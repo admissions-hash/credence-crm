@@ -1,0 +1,3912 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: Pipeline CRM API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: accounts
+    description: Account (company) operations
+  - name: contacts
+    description: Contact operations
+  - name: leads
+    description: Lead operations
+  - name: deals
+    description: Deal operations
+  - name: activities
+    description: Activity operations
+  - name: dashboard
+    description: Dashboard aggregate operations
+  - name: calendar
+    description: Calendar (.ics) feed operations
+  - name: Auth
+    description: Browser and mobile authentication endpoints.
+  - name: users
+    description: User directory operations
+  - name: availability
+    description: Staff availability settings and public meeting booking
+  - name: imports
+    description: CSV import audit history
+  - name: owner-backfill
+    description: Map legacy free-text owner strings on leads/deals/activities to real signed-in users.
+  - name: search
+    description: Cross-entity global search.
+  - name: notes
+    description: Free-form rich-text notes attached to leads, deals, accounts, and contacts.
+  - name: timeline
+    description: Unified record timeline mixing activities, notes, and stage changes.
+  - name: custom-properties
+    description: Admin-defined custom fields attached to leads, deals, accounts, and contacts.
+  - name: inbox
+    description: Shared email inbox — Gmail-synced threads and messages, optionally tied to a contact.
+  - name: reports
+    description: Saved custom reports — admin-built charts on Leads/Applications/Activities.
+  - name: Storage
+    description: Object storage upload and serving endpoints.
+  - name: eligibility
+    description: Report-card upload + admission eligibility verdict (Grades 2–12).
+paths:
+  /storage/uploads/request-url:
+    post:
+      tags: [Storage]
+      operationId: requestUploadUrl
+      summary: Request a presigned URL for file upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UploadUrlRequest' }
+      responses:
+        '200':
+          description: Presigned upload URL generated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadUrlResponse' }
+        '400':
+          description: Missing or invalid required fields.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /eligibility-checks:
+    get:
+      tags: [eligibility]
+      operationId: listEligibilityChecks
+      summary: List recent eligibility checks
+      parameters:
+        - in: query
+          name: dealId
+          required: false
+          schema: { type: string, format: uuid }
+          description: When provided, only checks attached to this application.
+      responses:
+        '200':
+          description: List of eligibility checks (newest first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EligibilityCheck' }
+    post:
+      tags: [eligibility]
+      operationId: createEligibilityCheck
+      summary: Upload + analyse a student report card
+      description: |
+        Pass the `objectPath` returned from `requestUploadUrl` after the
+        file has been uploaded to GCS. The server fetches the file,
+        extracts marks via the Gemini multimodal model, applies the
+        admission policy for the chosen grade + location, and stores the
+        verdict.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EligibilityCheckInput' }
+      responses:
+        '201':
+          description: Eligibility check created and analysed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EligibilityCheck' }
+        '400':
+          description: Invalid input.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '502':
+          description: Failed to analyse report card.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /eligibility-checks/{id}:
+    get:
+      tags: [eligibility]
+      operationId: getEligibilityCheck
+      summary: Fetch a single eligibility check
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The eligibility check.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EligibilityCheck' }
+        '404':
+          description: Not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    delete:
+      tags: [eligibility]
+      operationId: deleteEligibilityCheck
+      summary: Delete an eligibility check
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: Deleted.
+
+  /search:
+    get:
+      operationId: globalSearch
+      tags: [search]
+      summary: Cross-entity search across leads, contacts, accounts, and deals
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Query string. Returns empty groups if shorter than 2 characters.
+      responses:
+        "200":
+          description: Grouped search results, capped at 5 per group
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SearchResults" }
+
+  /custom-properties:
+    get:
+      operationId: listCustomProperties
+      tags: [custom-properties]
+      summary: List custom property definitions (excludes soft-deleted)
+      parameters:
+        - in: query
+          name: recordType
+          schema: { $ref: "#/components/schemas/CustomPropertyRecordType" }
+          description: When provided, only properties for that record type are returned.
+      responses:
+        "200":
+          description: Custom property definitions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CustomProperty" }
+    post:
+      operationId: createCustomProperty
+      tags: [custom-properties]
+      summary: Create a new custom property definition (admin-only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomPropertyInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomProperty" }
+  /custom-properties/{id}:
+    patch:
+      operationId: updateCustomProperty
+      tags: [custom-properties]
+      summary: Update a custom property definition (admin-only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomPropertyUpdateInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomProperty" }
+    delete:
+      operationId: deleteCustomProperty
+      tags: [custom-properties]
+      summary: Soft-delete a custom property (admin-only). Values are retained for 30 days.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Deleted }
+  /custom-properties/reorder:
+    post:
+      operationId: reorderCustomProperties
+      tags: [custom-properties]
+      summary: Reorder custom properties for a record type (admin-only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomPropertyReorderInput" }
+      responses:
+        "200":
+          description: Updated property list in the new order
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CustomProperty" }
+  /custom-property-values:
+    put:
+      operationId: upsertCustomPropertyValues
+      tags: [custom-properties]
+      summary: Upsert custom property values for a single record. Pass null to clear.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomPropertyValuesUpsertInput" }
+      responses:
+        "200":
+          description: Updated values map
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomPropertyValuesMap" }
+
+  /email-templates:
+    get:
+      operationId: listEmailTemplates
+      tags: [email-templates]
+      summary: List all email templates
+      responses:
+        "200":
+          description: Email templates ordered by most recently updated
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/EmailTemplate" }
+    post:
+      operationId: createEmailTemplate
+      tags: [email-templates]
+      summary: Create an email template (admin-only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmailTemplateInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EmailTemplate" }
+  /email-templates/{id}:
+    get:
+      operationId: getEmailTemplate
+      tags: [email-templates]
+      summary: Get an email template
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Email template
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EmailTemplate" }
+    patch:
+      operationId: updateEmailTemplate
+      tags: [email-templates]
+      summary: Update an email template (admin-only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmailTemplateInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EmailTemplate" }
+    delete:
+      operationId: deleteEmailTemplate
+      tags: [email-templates]
+      summary: Delete an email template (admin-only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Deleted }
+  /email-templates/{id}/render:
+    post:
+      operationId: renderEmailTemplate
+      tags: [email-templates]
+      summary: Render a template's subject and body with merge tags resolved against the given record context
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmailRenderInput" }
+      responses:
+        "200":
+          description: Rendered subject + body, plus the resolved recipient (if any)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EmailRenderOutput" }
+  /email-sends:
+    post:
+      operationId: logEmailSend
+      tags: [email-templates]
+      summary: Send an outbound email (via Gmail when connected, otherwise just log) and record it on the linked records
+      description: |
+        When `transport` is `gmail` and the Gmail connector is authorized for
+        this workspace, the email is sent through the Gmail API and the send is
+        logged as a completed `email` activity. When `transport` is `mailto`
+        (the default), delivery is the user's responsibility (their mail client
+        opens client-side via `mailto:`) and this endpoint only records the
+        send as a completed `email` activity for the timeline.
+
+        If `transport` is `gmail` but no Gmail connection is available, the
+        endpoint responds with `412 Precondition Failed` so the client can fall
+        back to the mailto path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmailSendInput" }
+      responses:
+        "201":
+          description: Email sent (when transport=gmail) or logged (when transport=mailto), plus the resulting activity entry
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EmailSendOutput" }
+        "412":
+          description: Gmail transport requested but no Gmail connection is available
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  gmailAvailable: { type: boolean }
+                required: [error, gmailAvailable]
+  /email-transport:
+    get:
+      operationId: getEmailTransport
+      tags: [email-templates]
+      summary: Report which email send transports are available
+      responses:
+        "200":
+          description: Transport availability
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EmailTransportStatus" }
+
+  /availability:
+    get:
+      operationId: getAvailability
+      tags: [availability]
+      summary: Get the signed-in user's availability settings
+      responses:
+        "200":
+          description: Availability settings
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AvailabilitySettings" }
+        "404": { description: Not configured yet }
+    put:
+      operationId: upsertAvailability
+      tags: [availability]
+      summary: Create or update the signed-in user's availability settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AvailabilityInput" }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AvailabilitySettings" }
+  /availability/bookings/upcoming:
+    get:
+      operationId: getUpcomingBookings
+      tags: [availability]
+      summary: List the signed-in user's upcoming confirmed bookings
+      responses:
+        "200":
+          description: Upcoming bookings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Booking" }
+  /availability/calendar-status:
+    get:
+      operationId: getCalendarStatus
+      tags: [availability]
+      summary: Report whether Google Calendar is connected for the signed-in staff user
+      responses:
+        "200":
+          description: Calendar status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CalendarStatus" }
+
+  /book/{slug}:
+    get:
+      operationId: getPublicBookingPage
+      tags: [availability]
+      summary: Public — staff name and meeting metadata for a booking link
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Booking page metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicBookingPage" }
+        "404": { description: Unknown slug }
+    post:
+      operationId: createPublicBooking
+      tags: [availability]
+      summary: Public — book a meeting slot
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PublicBookingInput" }
+      responses:
+        "201":
+          description: Booking created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicBookingResult" }
+        "409": { description: Slot is no longer available }
+  /book/{slug}/slots:
+    get:
+      operationId: getBookingSlots
+      tags: [availability]
+      summary: Public — list bookable slots (next 14 days) for a staff link
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Available slots
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicBookingSlots" }
+
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /accounts/export.csv:
+    get:
+      operationId: exportAccountsCsv
+      tags: [accounts]
+      summary: Export accounts as CSV
+      parameters:
+        - in: query
+          name: search
+          schema: { type: string }
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string }
+  /accounts/import:
+    post:
+      operationId: importAccounts
+      tags: [accounts]
+      summary: Import accounts from parsed CSV rows (preview with dryRun=true)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountImportInput" }
+      responses:
+        "200":
+          description: Import report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CsvImportReport" }
+
+  /accounts:
+    get:
+      operationId: listAccounts
+      tags: [accounts]
+      summary: List accounts
+      parameters:
+        - in: query
+          name: search
+          schema: { type: string }
+      responses:
+        "200":
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Account" }
+    post:
+      operationId: createAccount
+      tags: [accounts]
+      summary: Create account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+  /accounts/{id}:
+    get:
+      operationId: getAccount
+      tags: [accounts]
+      summary: Get account with related contacts and deals
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Account detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountDetail" }
+    patch:
+      operationId: updateAccount
+      tags: [accounts]
+      summary: Update account
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+    delete:
+      operationId: deleteAccount
+      tags: [accounts]
+      summary: Delete account
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Deleted
+
+  /contacts/export.csv:
+    get:
+      operationId: exportContactsCsv
+      tags: [contacts]
+      summary: Export contacts as CSV
+      parameters:
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: accountId
+          schema: { type: string }
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string }
+  /contacts/import:
+    post:
+      operationId: importContacts
+      tags: [contacts]
+      summary: Import contacts from parsed CSV rows (preview with dryRun=true)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ContactImportInput" }
+      responses:
+        "200":
+          description: Import report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CsvImportReport" }
+
+  /contacts:
+    get:
+      operationId: listContacts
+      tags: [contacts]
+      summary: List contacts
+      parameters:
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: accountId
+          schema: { type: string }
+      responses:
+        "200":
+          description: List of contacts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Contact" }
+    post:
+      operationId: createContact
+      tags: [contacts]
+      summary: Create contact
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ContactInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Contact" }
+  /contacts/{id}/lifecycle:
+    patch:
+      operationId: setContactLifecycleStage
+      tags: [contacts]
+      summary: Manually set a contact's lifecycle stage (admin only)
+      description: |
+        Manual lifecycle overrides are admin-only. Day-to-day forward
+        progression happens automatically as deals are created and won;
+        this endpoint is reserved for admins to correct mistakes or jump
+        stages out of band.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LifecycleStageInput" }
+      responses:
+        "200":
+          description: Updated contact
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Contact" }
+        "403":
+          description: Caller is not an admin
+
+  /contacts/{id}/lifecycle-history:
+    get:
+      operationId: getContactLifecycleHistory
+      tags: [contacts]
+      summary: Get the lifecycle change history for a contact
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Lifecycle history entries (newest first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/LifecycleHistoryEntry" }
+
+  /contacts/{id}:
+    get:
+      operationId: getContact
+      tags: [contacts]
+      summary: Get contact
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Contact
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Contact" }
+    patch:
+      operationId: updateContact
+      tags: [contacts]
+      summary: Update contact
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ContactInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Contact" }
+    delete:
+      operationId: deleteContact
+      tags: [contacts]
+      summary: Delete contact
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Deleted
+
+  /leads/export.csv:
+    get:
+      operationId: exportLeadsCsv
+      tags: [leads]
+      summary: Export leads as CSV
+      parameters:
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: status
+          schema: { $ref: "#/components/schemas/LeadStatus" }
+        - in: query
+          name: source
+          schema: { type: string }
+        - in: query
+          name: owner
+          schema: { type: string }
+        - in: query
+          name: ownerId
+          schema: { type: string }
+        - in: query
+          name: mine
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string }
+  /leads/import:
+    post:
+      operationId: importLeads
+      tags: [leads]
+      summary: Import leads from parsed CSV rows (preview with dryRun=true)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LeadImportInput" }
+      responses:
+        "200":
+          description: Import report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CsvImportReport" }
+
+  /leads:
+    get:
+      operationId: listLeads
+      tags: [leads]
+      summary: List leads
+      parameters:
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: status
+          schema: { $ref: "#/components/schemas/LeadStatus" }
+        - in: query
+          name: source
+          schema: { type: string }
+        - in: query
+          name: ownerId
+          schema: { type: string }
+        - in: query
+          name: mine
+          schema: { type: boolean }
+        - in: query
+          name: minScore
+          description: Only return leads whose score is >= this value (0-100).
+          schema: { type: integer, minimum: 0, maximum: 100 }
+        - in: query
+          name: hot
+          description: Shortcut for the Hot band threshold (score >= 70).
+          schema: { type: boolean }
+        - in: query
+          name: sort
+          description: |
+            Sort order. `score` sorts highest score first; default is most
+            recently created.
+          schema: { type: string, enum: [created, score] }
+      responses:
+        "200":
+          description: List of leads
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Lead" }
+    post:
+      operationId: createLead
+      tags: [leads]
+      summary: Create lead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LeadInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Lead" }
+  /leads/{id}:
+    get:
+      operationId: getLead
+      tags: [leads]
+      summary: Get lead
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Lead
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Lead" }
+    patch:
+      operationId: updateLead
+      tags: [leads]
+      summary: Update lead
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LeadInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Lead" }
+    delete:
+      operationId: deleteLead
+      tags: [leads]
+      summary: Delete lead
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Deleted
+  /leads/{id}/convert:
+    post:
+      operationId: convertLead
+      tags: [leads]
+      summary: Convert a lead into a deal (and optional account/contact)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConvertLeadInput" }
+      responses:
+        "201":
+          description: Created deal
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Deal" }
+
+  /deals/export.csv:
+    get:
+      operationId: exportDealsCsv
+      tags: [deals]
+      summary: Export deals as CSV
+      parameters:
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: stage
+          schema: { $ref: "#/components/schemas/DealStage" }
+        - in: query
+          name: accountId
+          schema: { type: string }
+        - in: query
+          name: ownerId
+          schema: { type: string }
+        - in: query
+          name: mine
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string }
+  /deals/import:
+    post:
+      operationId: importDeals
+      tags: [deals]
+      summary: Import deals from parsed CSV rows (preview with dryRun=true)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DealImportInput" }
+      responses:
+        "200":
+          description: Import report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CsvImportReport" }
+
+  /deals:
+    get:
+      operationId: listDeals
+      tags: [deals]
+      summary: List deals
+      parameters:
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: stage
+          schema: { $ref: "#/components/schemas/DealStage" }
+        - in: query
+          name: accountId
+          schema: { type: string }
+        - in: query
+          name: ownerId
+          schema: { type: string }
+        - in: query
+          name: mine
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: List of deals
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Deal" }
+    post:
+      operationId: createDeal
+      tags: [deals]
+      summary: Create deal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DealInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Deal" }
+  /deals/{id}:
+    get:
+      operationId: getDeal
+      tags: [deals]
+      summary: Get deal with stage history and related contacts/activities
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deal detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DealDetail" }
+    patch:
+      operationId: updateDeal
+      tags: [deals]
+      summary: Update deal (changing stage records stage history)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DealInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Deal" }
+    delete:
+      operationId: deleteDeal
+      tags: [deals]
+      summary: Delete deal
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Deleted
+  /deals/{id}/stage:
+    patch:
+      operationId: moveDealStage
+      tags: [deals]
+      summary: Move a deal to a different stage (records stage history)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DealStageMoveInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Deal" }
+
+  /activities:
+    get:
+      operationId: listActivities
+      tags: [activities]
+      summary: List activities
+      parameters:
+        - in: query
+          name: dealId
+          schema: { type: string }
+        - in: query
+          name: leadId
+          schema: { type: string }
+        - in: query
+          name: contactId
+          schema: { type: string }
+        - in: query
+          name: accountId
+          schema: { type: string }
+        - in: query
+          name: ownerId
+          schema: { type: string }
+        - in: query
+          name: mine
+          schema: { type: boolean }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200 }
+      responses:
+        "200":
+          description: List of activities
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Activity" }
+    post:
+      operationId: createActivity
+      tags: [activities]
+      summary: Create activity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActivityInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Activity" }
+  /activities/{id}:
+    patch:
+      operationId: updateActivity
+      tags: [activities]
+      summary: Update activity
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActivityInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Activity" }
+    delete:
+      operationId: deleteActivity
+      tags: [activities]
+      summary: Delete activity
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Deleted
+  /activities/{id}/complete:
+    post:
+      operationId: completeActivity
+      tags: [activities]
+      summary: Mark an activity as completed (stamps completedAt)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Completed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Activity" }
+  /activities/bulk-reschedule:
+    post:
+      operationId: bulkRescheduleActivities
+      tags: [activities]
+      summary: Reschedule the dueAt of many activities in a single call
+      description: >
+        Used by the dashboard's "Move all overdue to today / tomorrow" buttons
+        and by the matching Undo, which restores each task's previous dueAt.
+        Lifecycle audit activities and missing IDs are silently skipped.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BulkRescheduleActivitiesInput" }
+      responses:
+        "200":
+          description: Rescheduled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: integer }
+                  activities:
+                    type: array
+                    items: { $ref: "#/components/schemas/Activity" }
+                required: [updated, activities]
+  /activities/{id}/snooze:
+    post:
+      operationId: snoozeActivity
+      tags: [activities]
+      summary: Push the dueAt of an activity and re-arm its reminder
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SnoozeActivityInput" }
+      responses:
+        "200":
+          description: Snoozed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Activity" }
+
+  /notes:
+    get:
+      operationId: listNotes
+      tags: [notes]
+      summary: List notes for a record (pinned first, then newest)
+      parameters:
+        - in: query
+          name: recordType
+          required: true
+          schema: { $ref: "#/components/schemas/NoteRecordType" }
+        - in: query
+          name: recordId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: List of notes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Note" }
+    post:
+      operationId: createNote
+      tags: [notes]
+      summary: Create a note on a record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NoteInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Note" }
+  /notes/{id}:
+    patch:
+      operationId: updateNote
+      tags: [notes]
+      summary: Update a note's body (author or admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NoteUpdateInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Note" }
+    delete:
+      operationId: deleteNote
+      tags: [notes]
+      summary: Delete a note (author or admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Deleted
+  /notes/{id}/pin:
+    post:
+      operationId: pinNote
+      tags: [notes]
+      summary: Pin or unpin a note
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NotePinInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Note" }
+
+  /timeline:
+    get:
+      operationId: getRecordTimeline
+      tags: [timeline]
+      summary: Unified chronological timeline for a record (activities + notes + stage changes)
+      parameters:
+        - in: query
+          name: recordType
+          required: true
+          schema: { $ref: "#/components/schemas/NoteRecordType" }
+        - in: query
+          name: recordId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 30 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          description: Timeline entries newest-first, paginated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: "#/components/schemas/TimelineEntry" }
+                  total: { type: integer }
+                required: [entries, total]
+
+  /assessments:
+    get:
+      operationId: listAssessments
+      tags: [assessments]
+      summary: List assessments
+      parameters:
+        - in: query
+          name: dealId
+          schema: { type: string }
+        - in: query
+          name: result
+          schema: { $ref: "#/components/schemas/AssessmentResult" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Assessment" }
+    post:
+      operationId: createAssessment
+      tags: [assessments]
+      summary: Create assessment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssessmentInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Assessment" }
+
+  /assessments/{id}:
+    get:
+      operationId: getAssessment
+      tags: [assessments]
+      summary: Get assessment
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Assessment" }
+    patch:
+      operationId: updateAssessment
+      tags: [assessments]
+      summary: Update assessment
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssessmentInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Assessment" }
+    delete:
+      operationId: deleteAssessment
+      tags: [assessments]
+      summary: Delete assessment
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Deleted
+
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Pipeline-wide KPIs (open value, deals closing this month, win rate, leads this week)
+      parameters:
+        - in: query
+          name: ownerId
+          schema: { type: string }
+        - in: query
+          name: mine
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: KPI summary
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DashboardSummary" }
+  /dashboard/pipeline:
+    get:
+      operationId: getPipelineByStage
+      tags: [dashboard]
+      summary: Pipeline value and deal count grouped by stage
+      parameters:
+        - in: query
+          name: ownerId
+          schema: { type: string }
+        - in: query
+          name: mine
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Pipeline by stage
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PipelineStageBucket" }
+  /dashboard/lead-funnel:
+    get:
+      operationId: getLeadFunnel
+      tags: [dashboard]
+      summary: Lead counts grouped by status
+      parameters:
+        - in: query
+          name: ownerId
+          schema: { type: string }
+        - in: query
+          name: mine
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Lead funnel
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/LeadFunnelBucket" }
+  /dashboard/recent-activity:
+    get:
+      operationId: getRecentActivity
+      tags: [dashboard]
+      summary: Recent activity feed across the workspace
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 50 }
+        - in: query
+          name: ownerId
+          schema: { type: string }
+        - in: query
+          name: mine
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Recent activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Activity" }
+  /dashboard/top-accounts:
+    get:
+      operationId: getTopAccounts
+      tags: [dashboard]
+      summary: Top accounts by total open deal value
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 20 }
+        - in: query
+          name: ownerId
+          schema: { type: string }
+        - in: query
+          name: mine
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Top accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TopAccount" }
+  /dashboard/closing-this-month:
+    get:
+      operationId: getDealsClosingThisMonth
+      tags: [dashboard]
+      summary: Open deals with expected close in the current month
+      parameters:
+        - in: query
+          name: ownerId
+          schema: { type: string }
+        - in: query
+          name: mine
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Deals closing this month
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Deal" }
+  /dashboard/today:
+    get:
+      operationId: getTasksDueToday
+      tags: [dashboard]
+      summary: Tasks (and meetings) due today, optionally filtered by owner
+      parameters:
+        - in: query
+          name: owner
+          schema: { type: string }
+        - in: query
+          name: ownerId
+          schema: { type: string }
+        - in: query
+          name: mine
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Activities due today
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Activity" }
+  /dashboard/overdue:
+    get:
+      operationId: getOverdueTasks
+      tags: [dashboard]
+      summary: Open tasks with a due date before the start of today
+      parameters:
+        - in: query
+          name: owner
+          schema: { type: string }
+        - in: query
+          name: ownerId
+          schema: { type: string }
+        - in: query
+          name: mine
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Overdue activities (dueAt earlier than start of today, not completed)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Activity" }
+  /calendar/feed.ics:
+    get:
+      operationId: getCalendarFeed
+      tags: [calendar]
+      summary: Per-user iCalendar (.ics) feed of tasks and meetings
+      description: |
+        Public endpoint authenticated by an opaque per-user `token` query
+        parameter (issued via `POST /calendar/token`). Returns only the
+        signed-in user's tasks and meetings so calendar apps subscribed
+        to this URL never see other reps' data.
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: iCalendar feed
+          content:
+            text/calendar:
+              schema: { type: string }
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /calendar/token:
+    get:
+      operationId: getMyCalendarToken
+      tags: [calendar]
+      summary: Get the current user's calendar subscription token (if issued)
+      responses:
+        "200":
+          description: Calendar subscription info
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CalendarSubscription" }
+    post:
+      operationId: rotateMyCalendarToken
+      tags: [calendar]
+      summary: Issue or rotate the current user's calendar subscription token
+      responses:
+        "200":
+          description: Calendar subscription info
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CalendarSubscription" }
+    delete:
+      operationId: revokeMyCalendarToken
+      tags: [calendar]
+      summary: Revoke the current user's calendar subscription token
+      responses:
+        "200":
+          description: Calendar subscription info (token cleared)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CalendarSubscription" }
+  /dashboard/lifecycle:
+    get:
+      operationId: getLifecycleFunnel
+      tags: [dashboard]
+      summary: Contact counts and conversion percentages by lifecycle stage
+      responses:
+        "200":
+          description: Lifecycle funnel
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LifecycleFunnel" }
+
+  /dashboard/sales-trend:
+    get:
+      operationId: getSalesTrend
+      tags: [dashboard]
+      summary: Monthly won deal value for the last 6 months
+      parameters:
+        - in: query
+          name: ownerId
+          schema: { type: string }
+        - in: query
+          name: mine
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Monthly trend
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SalesTrendPoint" }
+
+  /auth/user:
+    get:
+      tags: [Auth]
+      operationId: getCurrentAuthUser
+      summary: Get the currently authenticated user
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+      responses:
+        '200':
+          description: Auth status resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUserEnvelope'
+  /login:
+    get:
+      tags: [Auth]
+      operationId: beginBrowserLogin
+      summary: Start the browser OIDC login flow
+      parameters:
+        - name: returnTo
+          in: query
+          required: false
+          description: Relative path to redirect to after login (must start with `/`). Defaults to `/`.
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to the OIDC authorization endpoint.
+  /callback:
+    get:
+      tags: [Auth]
+      operationId: handleBrowserLoginCallback
+      summary: Complete the browser OIDC login flow
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: iss
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uri
+      responses:
+        '302':
+          description: Redirect to the `returnTo` path on success (defaults to `/`) or `/api/login` on failure.
+  /logout:
+    get:
+      tags: [Auth]
+      operationId: logoutBrowserSession
+      summary: Clear the session and begin OIDC logout
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+      responses:
+        '302':
+          description: Redirect to the OIDC provider logout URL.
+  /mobile-auth/token-exchange:
+    post:
+      tags: [Auth]
+      operationId: exchangeMobileAuthorizationCode
+      summary: Exchange a mobile OIDC code for a session token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MobileTokenExchangeRequest'
+      responses:
+        '200':
+          description: Session created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MobileTokenExchangeSuccess'
+        '400':
+          description: Missing or invalid required fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Token did not contain usable claims.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Token exchange failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /mobile-auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logoutMobileSession
+      summary: Delete a mobile session token
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+      responses:
+        '200':
+          description: Logout processed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutSuccess'
+
+  /users:
+    get:
+      tags: [users]
+      operationId: listUsers
+      summary: List all users who have signed in (for owner pickers etc.)
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AuthUser" }
+    post:
+      tags: [users]
+      operationId: createUser
+      summary: Add a new staff profile (admin-managed user without OIDC sign-in).
+      description: Creates a user row so the person appears in owner pickers and can be assigned to leads/deals/activities. The role is stored in lastName as "(Role)" so existing display helpers render it consistently.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUserInput" }
+      responses:
+        "201":
+          description: Created user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthUser" }
+        "400":
+          description: Invalid payload.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "409":
+          description: A user with this email already exists.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /owner-backfill/legacy-owners:
+    get:
+      tags: [owner-backfill]
+      operationId: listLegacyOwners
+      summary: List distinct legacy owner strings (across leads/deals/activities) that still need to be mapped to a real user.
+      responses:
+        "200":
+          description: Distinct legacy owner strings with per-entity unassigned counts.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/LegacyOwnerSummary" }
+
+  /owner-backfill:
+    post:
+      tags: [owner-backfill]
+      operationId: applyOwnerBackfill
+      summary: Bulk-assign ownerId on leads/deals/activities for each legacy owner string.
+      description: For each mapping, sets ownerId to the supplied user on every lead/deal/activity whose legacy `owner` text matches and whose `ownerId` is currently null. Does not overwrite existing ownerId values.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OwnerBackfillRequest" }
+      responses:
+        "200":
+          description: Per-mapping update counts.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OwnerBackfillResult" }
+        "401":
+          description: Sign-in required.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "400":
+          description: Invalid mapping payload (e.g. unknown ownerId).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /imports:
+    get:
+      tags: [imports]
+      operationId: listImports
+      summary: List recent CSV imports (audit trail of who imported what and when)
+      parameters:
+        - in: query
+          name: entity
+          schema: { type: string }
+          description: Optional filter by entity (e.g. "leads", "contacts").
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: List of import records
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CsvImportRecord" }
+
+  /sequences:
+    get:
+      operationId: listSequences
+      tags: [sequences]
+      summary: List all email sequences
+      responses:
+        "200":
+          description: Sequences ordered by most recently updated
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SequenceSummary" }
+    post:
+      operationId: createSequence
+      tags: [sequences]
+      summary: Create a new email sequence with its steps (admin-only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SequenceInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SequenceDetail" }
+  /sequences/{id}:
+    get:
+      operationId: getSequence
+      tags: [sequences]
+      summary: Get a sequence with its ordered steps
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Sequence detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SequenceDetail" }
+        "404": { description: Not found }
+    put:
+      operationId: updateSequence
+      tags: [sequences]
+      summary: Replace a sequence's name, description, active flag, and full step list (admin-only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SequenceInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SequenceDetail" }
+    delete:
+      operationId: deleteSequence
+      tags: [sequences]
+      summary: Delete a sequence and all its enrolments (admin-only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Deleted }
+  /sequences/{id}/enrol:
+    post:
+      operationId: enrolInSequence
+      tags: [sequences]
+      summary: Enrol a lead or contact into the sequence. The first step fires on the next scheduler tick.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SequenceEnrolInput" }
+      responses:
+        "201":
+          description: Enrolment created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SequenceEnrolment" }
+        "409":
+          description: This lead or contact is already actively enrolled in this sequence.
+
+  /sequence-enrolments:
+    get:
+      operationId: listSequenceEnrolments
+      tags: [sequences]
+      summary: List sequence enrolments for a single lead or contact
+      parameters:
+        - in: query
+          name: leadId
+          schema: { type: string }
+        - in: query
+          name: contactId
+          schema: { type: string }
+      responses:
+        "200":
+          description: Enrolments (most recent first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SequenceEnrolment" }
+  /reports:
+    get:
+      operationId: listSavedReports
+      tags: [reports]
+      summary: List saved reports
+      responses:
+        "200":
+          description: Saved reports ordered by most recently updated
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SavedReport" }
+    post:
+      operationId: createSavedReport
+      tags: [reports]
+      summary: Create a saved report (admin-only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SavedReportInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedReport" }
+  /reports/run:
+    post:
+      operationId: runReport
+      tags: [reports]
+      summary: Execute an ad-hoc report config and return chart-ready rows
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReportConfig" }
+      responses:
+        "200":
+          description: Aggregated rows
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportRunResult" }
+  /reports/{id}:
+    get:
+      operationId: getSavedReport
+      tags: [reports]
+      summary: Get a saved report
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Saved report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedReport" }
+        "404": { description: Not found }
+    patch:
+      operationId: updateSavedReport
+      tags: [reports]
+      summary: Update a saved report (admin-only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SavedReportInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedReport" }
+    delete:
+      operationId: deleteSavedReport
+      tags: [reports]
+      summary: Delete a saved report (admin-only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Deleted }
+  /reports/{id}/pin:
+    post:
+      operationId: pinSavedReport
+      tags: [reports]
+      summary: Pin or unpin a saved report on the dashboard (admin-only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SavedReportPinInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedReport" }
+  /inbox/threads:
+    get:
+      operationId: listInboxThreads
+      tags: [inbox]
+      summary: List shared-inbox threads, optionally filtered by status and owner.
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [unread, open, closed, unmatched, all]
+          description: |
+            "unread" — open threads with at least one unread inbound message;
+            "open" (default) — open threads matched to a contact;
+            "closed" — closed threads;
+            "unmatched" — threads with no contact match yet;
+            "all" — every thread.
+        - in: query
+          name: owner
+          schema:
+            type: string
+          description: |
+            Filter by assignee. "me" — threads assigned to the current user;
+            "unassigned" — threads with no assignee; "any" (default) —
+            no owner filter; any other value is treated as a user id.
+      responses:
+        "200":
+          description: Threads ordered by most recent message
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/InboxThreadSummary" }
+  /inbox/threads/{id}:
+    get:
+      operationId: getInboxThread
+      tags: [inbox]
+      summary: Get a thread with its full message list. Marks the thread read.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Thread + messages
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboxThreadDetail" }
+        "404": { description: Not found }
+  /inbox/threads/{id}/reply:
+    post:
+      operationId: replyToInboxThread
+      tags: [inbox]
+      summary: Reply to a thread via the connected Gmail account.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InboxReplyInput" }
+      responses:
+        "201":
+          description: Reply sent and appended to the thread
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboxThreadDetail" }
+        "412":
+          description: Gmail is not connected
+  /inbox/threads/{id}/close:
+    post:
+      operationId: closeInboxThread
+      tags: [inbox]
+      summary: Toggle a thread's status between open and closed.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InboxCloseInput" }
+      responses:
+        "200":
+          description: Updated thread
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboxThreadSummary" }
+  /inbox/threads/{id}/assign:
+    post:
+      operationId: assignInboxThread
+      tags: [inbox]
+      summary: Assign (or unassign) the conversation to a staff user.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InboxAssignInput" }
+      responses:
+        "200":
+          description: Updated thread
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboxThreadSummary" }
+  /contacts/{id}/threads:
+    get:
+      operationId: listThreadsForContact
+      tags: [inbox]
+      summary: List inbox threads attached to a contact (Conversations tab).
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Threads ordered by most recent message
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/InboxThreadSummary" }
+
+  /sequence-enrolments/{id}/unenrol:
+    post:
+      operationId: unenrolFromSequence
+      tags: [sequences]
+      summary: Mark an enrolment as unenrolled, stopping any further sends.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated enrolment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SequenceEnrolment" }
+
+components:
+  parameters:
+    AuthorizationSessionHeader:
+      name: Authorization
+      in: header
+      required: false
+      description: Opaque session token — `Bearer <sid>`.
+      schema:
+        type: string
+    SessionCookie:
+      name: sid
+      in: cookie
+      required: false
+      description: Browser session cookie.
+      schema:
+        type: string
+  schemas:
+    AuthUser:
+      type: object
+      required: [id, email, firstName, lastName, profileImageUrl]
+      properties:
+        id:
+          type: string
+        email:
+          type: [string, 'null']
+          format: email
+        firstName:
+          type: [string, 'null']
+        lastName:
+          type: [string, 'null']
+        profileImageUrl:
+          type: [string, 'null']
+    CreateUserInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: "Staff member's display name (first + last as a single string is fine)."
+        role:
+          type: [string, 'null']
+          description: "Optional role/title (e.g. 'Admissions Supervisor'). Stored alongside the name so it shows in owner pickers."
+        email:
+          type: [string, 'null']
+          format: email
+          description: "Optional email. Required if you want to receive task reminders for this user."
+    AuthUserEnvelope:
+      type: object
+      required: [user, isAuthorized, isAdmin]
+      properties:
+        user:
+          description: The Replit user attached to the current session, if any. Always returned when a session exists, even if the user is not on the staff allow-list — the UI uses this to show a "not authorised" page that names the email they signed in with.
+          oneOf:
+            - $ref: '#/components/schemas/AuthUser'
+            - type: 'null'
+        isAuthorized:
+          type: boolean
+          description: Whether the signed-in user is on the `ALLOWED_EMAILS` allow-list and may access admissions data. False when no user is signed in.
+        isAdmin:
+          type: boolean
+          description: Whether the signed-in user is an admin (listed in `ADMIN_EMAILS`, or — if that env var is unset — any allow-listed staffer). Admins can moderate other users' content such as editing or deleting any note.
+    MobileTokenExchangeRequest:
+      type: object
+      required: [code, code_verifier, redirect_uri, state]
+      properties:
+        code:
+          type: string
+          minLength: 1
+        code_verifier:
+          type: string
+          minLength: 1
+        redirect_uri:
+          type: string
+          minLength: 1
+          format: uri
+        state:
+          type: string
+          minLength: 1
+        nonce:
+          type: string
+          minLength: 1
+    MobileTokenExchangeSuccess:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+    LogoutSuccess:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          const: true
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    UploadUrlRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name: { type: string, minLength: 1 }
+        size: { type: integer, minimum: 1 }
+        contentType: { type: string, minLength: 1 }
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL: { type: string, format: uri }
+        objectPath: { type: string }
+        metadata: { $ref: '#/components/schemas/UploadUrlRequest' }
+
+    EligibilityLocation:
+      type: string
+      enum: [dubai, non_dubai]
+    EligibilityVerdict:
+      type: string
+      enum: [eligible, not_eligible, needs_review]
+    EligibilityTargetGrade:
+      type: string
+      enum: ["2","3","4","5","6","7","8","9","10","11","12"]
+    EligibilitySubjectMark:
+      type: object
+      required: [name, percentage]
+      properties:
+        name: { type: string }
+        percentage:
+          type: number
+          description: Subject percentage on a 0–100 scale.
+        rawScore: { type: [string, 'null'] }
+    EligibilityExtractedMarks:
+      type: object
+      properties:
+        subjects:
+          type: array
+          items: { $ref: '#/components/schemas/EligibilitySubjectMark' }
+        aggregatePercentage:
+          type: [number, 'null']
+          description: Aggregate % across all subjects, if reported.
+        notes: { type: [string, 'null'] }
+    EligibilityCheckInput:
+      type: object
+      required: [studentName, targetGrade, location, fileObjectPath, fileMimeType]
+      properties:
+        studentName: { type: string, minLength: 1, maxLength: 200 }
+        targetGrade: { $ref: '#/components/schemas/EligibilityTargetGrade' }
+        location: { $ref: '#/components/schemas/EligibilityLocation' }
+        fileObjectPath: { type: string, minLength: 1 }
+        fileMimeType: { type: string, minLength: 1 }
+        fileName: { type: [string, 'null'] }
+        dealId: { type: [string, 'null'], format: uuid }
+    EligibilityCheck:
+      type: object
+      required:
+        - id
+        - studentName
+        - targetGrade
+        - location
+        - fileObjectPath
+        - fileMimeType
+        - verdict
+        - reasoning
+        - createdAt
+      properties:
+        id: { type: string, format: uuid }
+        dealId: { type: [string, 'null'], format: uuid }
+        studentName: { type: string }
+        targetGrade: { $ref: '#/components/schemas/EligibilityTargetGrade' }
+        location: { $ref: '#/components/schemas/EligibilityLocation' }
+        fileObjectPath: { type: string }
+        fileMimeType: { type: string }
+        fileName: { type: [string, 'null'] }
+        extractedMarks:
+          oneOf:
+            - { $ref: '#/components/schemas/EligibilityExtractedMarks' }
+            - { type: 'null' }
+        verdict: { $ref: '#/components/schemas/EligibilityVerdict' }
+        reasoning: { type: string }
+        createdBy: { type: [string, 'null'] }
+        createdByName: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+
+    CalendarSubscription:
+      type: object
+      description: Per-user calendar subscription token + ready-to-paste URL.
+      required: [hasToken]
+      properties:
+        hasToken:
+          type: boolean
+        token:
+          type: [string, 'null']
+        feedUrl:
+          type: [string, 'null']
+          description: Absolute URL the calendar app should subscribe to. Includes the token query parameter.
+        createdAt:
+          type: [string, 'null']
+          format: date-time
+
+    HealthStatus:
+      type: object
+      properties:
+        status: { type: string }
+      required: [status]
+
+    LeadStatus:
+      type: string
+      enum: [new, contacted, qualified, unqualified, converted]
+
+    LeadSource:
+      type: string
+      enum: [website, referral, cold_outreach, event, partner, other]
+
+    DealStage:
+      type: string
+      enum: [open_lead, report_card_review, assessment, offer, enrolled, declined]
+
+    AssessmentResult:
+      type: string
+      enum: [pending, pass, fail]
+
+    Assessment:
+      type: object
+      properties:
+        id: { type: string }
+        dealId: { type: string }
+        dealName: { type: string, nullable: true }
+        accountName: { type: string, nullable: true }
+        gradeApplying: { type: string, nullable: true }
+        studentLocation: { type: string, nullable: true }
+        isSibling: { type: boolean }
+        englishScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        mathScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        scienceScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        interviewScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        testEnglishScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        testMathScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        result: { $ref: "#/components/schemas/AssessmentResult" }
+        notes: { type: string, nullable: true }
+        assessedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, dealId, result, isSibling, createdAt, updatedAt]
+
+    AssessmentInput:
+      type: object
+      properties:
+        dealId: { type: string }
+        englishScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        mathScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        scienceScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        interviewScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        testEnglishScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        testMathScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        result: { $ref: "#/components/schemas/AssessmentResult" }
+        notes: { type: string, nullable: true }
+        assessedAt: { type: string, format: date-time, nullable: true }
+      required: [dealId]
+
+    ActivityType:
+      type: string
+      enum: [call, email, meeting, note, task, lifecycle_change]
+
+    LifecycleStage:
+      type: string
+      enum: [lead, mql, sql, opportunity, customer, other]
+
+    LifecycleStageInput:
+      type: object
+      properties:
+        stage: { $ref: "#/components/schemas/LifecycleStage" }
+        reason: { type: string, maxLength: 500, nullable: true }
+      required: [stage]
+
+    LifecycleHistoryEntry:
+      type: object
+      properties:
+        id: { type: string }
+        contactId: { type: string }
+        fromStage: { $ref: "#/components/schemas/LifecycleStage", nullable: true }
+        toStage: { $ref: "#/components/schemas/LifecycleStage" }
+        changedByUserId: { type: string, nullable: true }
+        reason: { type: string, nullable: true }
+        changedAt: { type: string, format: date-time }
+      required: [id, contactId, toStage, changedAt]
+
+    LifecycleFunnelEntry:
+      type: object
+      properties:
+        stage: { $ref: "#/components/schemas/LifecycleStage" }
+        count: { type: integer }
+        reachedCount: { type: integer }
+        conversionPct: { type: number }
+      required: [stage, count, reachedCount, conversionPct]
+
+    LifecycleFunnel:
+      type: object
+      properties:
+        stages:
+          type: array
+          items: { $ref: "#/components/schemas/LifecycleFunnelEntry" }
+        totalFunnel: { type: integer }
+      required: [stages, totalFunnel]
+
+    Account:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        industry: { type: string, nullable: true }
+        website: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        owner: { type: string, nullable: true }
+        size: { type: string, nullable: true }
+        location: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        openDealValue: { type: number }
+        openDealCount: { type: integer }
+        contactCount: { type: integer }
+        customProperties:
+          $ref: "#/components/schemas/CustomPropertyValuesMap"
+      required: [id, name, createdAt, updatedAt, openDealValue, openDealCount, contactCount]
+
+    AccountInput:
+      type: object
+      properties:
+        name: { type: string, minLength: 1 }
+        industry: { type: string, nullable: true }
+        website: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        owner: { type: string, nullable: true }
+        size: { type: string, nullable: true }
+        location: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+      required: [name]
+
+    AccountDetail:
+      allOf:
+        - $ref: "#/components/schemas/Account"
+        - type: object
+          properties:
+            contacts:
+              type: array
+              items: { $ref: "#/components/schemas/Contact" }
+            deals:
+              type: array
+              items: { $ref: "#/components/schemas/Deal" }
+          required: [contacts, deals]
+
+    Contact:
+      type: object
+      properties:
+        id: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        title: { type: string, nullable: true }
+        accountId: { type: string, nullable: true }
+        accountName: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        lifecycleStage: { $ref: "#/components/schemas/LifecycleStage" }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        customProperties:
+          $ref: "#/components/schemas/CustomPropertyValuesMap"
+      required: [id, firstName, lastName, lifecycleStage, createdAt, updatedAt]
+
+    ContactInput:
+      type: object
+      properties:
+        firstName: { type: string, minLength: 1 }
+        lastName: { type: string, minLength: 1 }
+        email: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        title: { type: string, nullable: true }
+        accountId: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+      required: [firstName, lastName]
+
+    Lead:
+      type: object
+      properties:
+        id: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        company: { type: string, nullable: true }
+        title: { type: string, nullable: true }
+        status: { $ref: "#/components/schemas/LeadStatus" }
+        source: { $ref: "#/components/schemas/LeadSource" }
+        owner: { type: string, nullable: true }
+        ownerId: { type: string, nullable: true }
+        ownerName: { type: string, nullable: true }
+        ownerAvatarUrl: { type: string, nullable: true }
+        estimatedValue: { type: number, nullable: true }
+        notes: { type: string, nullable: true }
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Engagement score 0-100 maintained by the lead-scoring engine.
+        band:
+          type: string
+          enum: [cold, warm, hot]
+          description: Score band derived from `score` (cold <30, warm 30-69, hot >=70).
+        scoreUpdatedAt: { type: string, format: date-time }
+        scoreBreakdown:
+          $ref: "#/components/schemas/LeadScoreBreakdown"
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        customProperties:
+          $ref: "#/components/schemas/CustomPropertyValuesMap"
+      required: [id, firstName, lastName, status, source, score, band, scoreUpdatedAt, createdAt, updatedAt]
+
+    LeadScoreBreakdown:
+      type: object
+      description: Per-rule contribution counts behind a lead's current score.
+      properties:
+        emailReplies: { type: integer }
+        callsAnswered: { type: integer }
+        meetingsAttended: { type: integer }
+        assessmentsBooked: { type: integer }
+        decayDays: { type: integer, description: Days since the most recent activity (or lead creation). }
+        raw: { type: integer, description: Pre-cap score (positive contributions minus decay). }
+        capped: { type: integer, description: Final score after the 0-100 cap. }
+      required: [emailReplies, callsAnswered, meetingsAttended, assessmentsBooked, decayDays, raw, capped]
+
+    LeadInput:
+      type: object
+      properties:
+        firstName: { type: string, minLength: 1 }
+        lastName: { type: string, minLength: 1 }
+        email: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        company: { type: string, nullable: true }
+        title: { type: string, nullable: true }
+        status: { $ref: "#/components/schemas/LeadStatus" }
+        source: { $ref: "#/components/schemas/LeadSource" }
+        owner: { type: string, nullable: true }
+        ownerId: { type: string, nullable: true }
+        estimatedValue: { type: number, nullable: true }
+        notes: { type: string, nullable: true }
+      required: [firstName, lastName, status, source]
+
+    ConvertLeadInput:
+      type: object
+      properties:
+        dealName: { type: string, minLength: 1 }
+        value: { type: number }
+        expectedCloseDate: { type: string, format: date-time, nullable: true }
+        accountName: { type: string, nullable: true }
+        accountId: { type: string, nullable: true }
+      required: [dealName, value]
+
+    Deal:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        stage: { $ref: "#/components/schemas/DealStage" }
+        value: { type: number }
+        probability: { type: integer, minimum: 0, maximum: 100 }
+        expectedCloseDate: { type: string, format: date-time, nullable: true }
+        accountId: { type: string, nullable: true }
+        accountName: { type: string, nullable: true }
+        primaryContactId: { type: string, nullable: true }
+        primaryContactName: { type: string, nullable: true }
+        owner: { type: string, nullable: true }
+        ownerId: { type: string, nullable: true }
+        ownerName: { type: string, nullable: true }
+        ownerAvatarUrl: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        gradeApplying: { type: string, nullable: true }
+        studentLocation: { type: string }
+        isSibling: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        customProperties:
+          $ref: "#/components/schemas/CustomPropertyValuesMap"
+      required: [id, name, stage, value, probability, studentLocation, isSibling, createdAt, updatedAt]
+
+    DealInput:
+      type: object
+      properties:
+        name: { type: string, minLength: 1 }
+        stage: { $ref: "#/components/schemas/DealStage" }
+        value: { type: number, minimum: 0 }
+        probability: { type: integer, minimum: 0, maximum: 100 }
+        expectedCloseDate: { type: string, format: date-time, nullable: true }
+        accountId: { type: string, nullable: true }
+        primaryContactId: { type: string, nullable: true }
+        owner: { type: string, nullable: true }
+        ownerId: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        gradeApplying: { type: string, nullable: true }
+        studentLocation: { type: string }
+        isSibling: { type: boolean }
+      required: [name, stage, value, probability]
+
+    DealStageMoveInput:
+      type: object
+      properties:
+        stage: { $ref: "#/components/schemas/DealStage" }
+        note: { type: string, nullable: true }
+      required: [stage]
+
+    DealStageHistoryEntry:
+      type: object
+      properties:
+        id: { type: string }
+        fromStage: { $ref: "#/components/schemas/DealStage", nullable: true }
+        toStage: { $ref: "#/components/schemas/DealStage" }
+        note: { type: string, nullable: true }
+        changedAt: { type: string, format: date-time }
+      required: [id, toStage, changedAt]
+
+    DealDetail:
+      allOf:
+        - $ref: "#/components/schemas/Deal"
+        - type: object
+          properties:
+            stageHistory:
+              type: array
+              items: { $ref: "#/components/schemas/DealStageHistoryEntry" }
+            activities:
+              type: array
+              items: { $ref: "#/components/schemas/Activity" }
+            contacts:
+              type: array
+              items: { $ref: "#/components/schemas/Contact" }
+          required: [stageHistory, activities, contacts]
+
+    Activity:
+      type: object
+      properties:
+        id: { type: string }
+        type: { $ref: "#/components/schemas/ActivityType" }
+        subject: { type: string }
+        body: { type: string, nullable: true }
+        occurredAt: { type: string, format: date-time }
+        dueAt: { type: string, format: date-time, nullable: true }
+        reminderSentAt: { type: string, format: date-time, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
+        owner: { type: string, nullable: true }
+        ownerId: { type: string, nullable: true }
+        ownerName: { type: string, nullable: true }
+        ownerAvatarUrl: { type: string, nullable: true }
+        dealId: { type: string, nullable: true }
+        dealName: { type: string, nullable: true }
+        leadId: { type: string, nullable: true }
+        leadName: { type: string, nullable: true }
+        contactId: { type: string, nullable: true }
+        contactName: { type: string, nullable: true }
+        accountId: { type: string, nullable: true }
+        accountName: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+      required: [id, type, subject, occurredAt, createdAt]
+
+    ActivityInput:
+      type: object
+      properties:
+        type: { $ref: "#/components/schemas/ActivityType" }
+        subject: { type: string, minLength: 1 }
+        body: { type: string, nullable: true }
+        occurredAt: { type: string, format: date-time }
+        dueAt: { type: string, format: date-time, nullable: true }
+        owner: { type: string, nullable: true }
+        ownerId: { type: string, nullable: true }
+        dealId: { type: string, nullable: true }
+        leadId: { type: string, nullable: true }
+        contactId: { type: string, nullable: true }
+        accountId: { type: string, nullable: true }
+      required: [type, subject, occurredAt]
+
+    SnoozeActivityInput:
+      type: object
+      properties:
+        dueAt: { type: string, format: date-time }
+      required: [dueAt]
+
+    BulkRescheduleActivityItem:
+      type: object
+      properties:
+        id: { type: string }
+        dueAt: { type: string, format: date-time }
+      required: [id, dueAt]
+
+    BulkRescheduleActivitiesInput:
+      type: object
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { $ref: "#/components/schemas/BulkRescheduleActivityItem" }
+      required: [items]
+
+    NoteRecordType:
+      type: string
+      enum: [lead, deal, account, contact]
+
+    TimelineEntryKind:
+      type: string
+      enum: [activity, note, stage_change]
+
+    TimelineStageChange:
+      type: object
+      properties:
+        id: { type: string }
+        dealId: { type: string }
+        fromStage: { $ref: "#/components/schemas/DealStage", nullable: true }
+        toStage: { $ref: "#/components/schemas/DealStage" }
+        note: { type: string, nullable: true }
+      required: [id, dealId, toStage]
+
+    TimelineEntry:
+      type: object
+      description: A single entry in a record's unified timeline. Exactly one of `activity`, `note`, or `stageChange` is populated based on `kind`.
+      properties:
+        id: { type: string }
+        kind: { $ref: "#/components/schemas/TimelineEntryKind" }
+        occurredAt: { type: string, format: date-time }
+        activity:
+          oneOf:
+            - $ref: "#/components/schemas/Activity"
+            - type: "null"
+        note:
+          oneOf:
+            - $ref: "#/components/schemas/Note"
+            - type: "null"
+        stageChange:
+          oneOf:
+            - $ref: "#/components/schemas/TimelineStageChange"
+            - type: "null"
+      required: [id, kind, occurredAt]
+
+    Note:
+      type: object
+      properties:
+        id: { type: string }
+        recordType: { $ref: "#/components/schemas/NoteRecordType" }
+        recordId: { type: string }
+        body: { type: string }
+        isPinned: { type: boolean }
+        authorId: { type: string, nullable: true }
+        authorName: { type: string, nullable: true }
+        authorAvatarUrl: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, recordType, recordId, body, isPinned, createdAt, updatedAt]
+
+    NoteInput:
+      type: object
+      properties:
+        recordType: { $ref: "#/components/schemas/NoteRecordType" }
+        recordId: { type: string, format: uuid }
+        body: { type: string, minLength: 1, maxLength: 50000 }
+        isPinned: { type: boolean }
+      required: [recordType, recordId, body]
+
+    NoteUpdateInput:
+      type: object
+      properties:
+        body: { type: string, minLength: 1, maxLength: 50000 }
+      required: [body]
+
+    NotePinInput:
+      type: object
+      properties:
+        isPinned: { type: boolean }
+      required: [isPinned]
+
+    DashboardSummary:
+      type: object
+      properties:
+        openPipelineValue: { type: number }
+        openDealCount: { type: integer }
+        weightedPipelineValue: { type: number }
+        wonThisMonthValue: { type: number }
+        wonThisMonthCount: { type: integer }
+        closingThisMonthValue: { type: number }
+        closingThisMonthCount: { type: integer }
+        winRatePct: { type: number }
+        leadsThisWeek: { type: integer }
+        activeLeadCount: { type: integer }
+      required:
+        - openPipelineValue
+        - openDealCount
+        - weightedPipelineValue
+        - wonThisMonthValue
+        - wonThisMonthCount
+        - closingThisMonthValue
+        - closingThisMonthCount
+        - winRatePct
+        - leadsThisWeek
+        - activeLeadCount
+
+    PipelineStageBucket:
+      type: object
+      properties:
+        stage: { $ref: "#/components/schemas/DealStage" }
+        count: { type: integer }
+        value: { type: number }
+      required: [stage, count, value]
+
+    LeadFunnelBucket:
+      type: object
+      properties:
+        status: { $ref: "#/components/schemas/LeadStatus" }
+        count: { type: integer }
+      required: [status, count]
+
+    TopAccount:
+      type: object
+      properties:
+        accountId: { type: string }
+        accountName: { type: string }
+        openValue: { type: number }
+        openDealCount: { type: integer }
+      required: [accountId, accountName, openValue, openDealCount]
+
+    SalesTrendPoint:
+      type: object
+      properties:
+        month: { type: string, description: "YYYY-MM" }
+        wonValue: { type: number }
+        wonCount: { type: integer }
+      required: [month, wonValue, wonCount]
+
+    LeadImportRow:
+      type: object
+      description: A row of CSV data being imported as a lead. All fields are optional strings; the server validates and coerces them.
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        company: { type: string }
+        title: { type: string }
+        status: { type: string }
+        source: { type: string }
+        owner: { type: string }
+        estimatedValue: { type: string }
+        notes: { type: string }
+
+    LeadImportInput:
+      type: object
+      properties:
+        dryRun: { type: boolean }
+        rows:
+          type: array
+          items: { $ref: "#/components/schemas/LeadImportRow" }
+      required: [dryRun, rows]
+
+    ContactImportRow:
+      type: object
+      description: A row of CSV data being imported as a contact. All fields are optional strings; the server validates and coerces them.
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        title: { type: string }
+        accountName: { type: string }
+        notes: { type: string }
+
+    ContactImportInput:
+      type: object
+      properties:
+        dryRun: { type: boolean }
+        rows:
+          type: array
+          items: { $ref: "#/components/schemas/ContactImportRow" }
+      required: [dryRun, rows]
+
+    DealImportRow:
+      type: object
+      description: A row of CSV data being imported as a deal/application. All fields are optional strings; the server validates and coerces them. accountName is matched case-insensitively to existing accounts; stage is validated against the DealStage enum. primaryContactEmail is matched case-insensitively to an existing contact's email; primaryContactName ("First Last") is matched case-insensitively against contacts on the resolved account. Either contact column is optional, but when provided the value must resolve to an existing contact.
+      properties:
+        name: { type: string }
+        stage: { type: string }
+        accountName: { type: string }
+        primaryContactEmail: { type: string }
+        primaryContactName: { type: string }
+        owner: { type: string }
+        value: { type: string }
+        expectedClose: { type: string }
+        gradeApplying: { type: string }
+        studentLocation: { type: string }
+        isSibling: { type: string }
+        notes: { type: string }
+
+    DealImportInput:
+      type: object
+      properties:
+        dryRun: { type: boolean }
+        rows:
+          type: array
+          items: { $ref: "#/components/schemas/DealImportRow" }
+      required: [dryRun, rows]
+
+    AccountImportRow:
+      type: object
+      description: A row of CSV data being imported as an account. All fields are optional strings; the server validates and coerces them.
+      properties:
+        name: { type: string }
+        industry: { type: string }
+        website: { type: string }
+        phone: { type: string }
+        owner: { type: string }
+        size: { type: string }
+        location: { type: string }
+        notes: { type: string }
+
+    AccountImportInput:
+      type: object
+      properties:
+        dryRun: { type: boolean }
+        rows:
+          type: array
+          items: { $ref: "#/components/schemas/AccountImportRow" }
+      required: [dryRun, rows]
+
+    CsvImportError:
+      type: object
+      properties:
+        rowNumber: { type: integer, description: "1-based row number within the data rows (excluding header)" }
+        field: { type: string, nullable: true }
+        message: { type: string }
+      required: [rowNumber, message]
+
+    CsvImportReport:
+      type: object
+      properties:
+        totalRows: { type: integer }
+        validRows: { type: integer }
+        insertedRows: { type: integer }
+        existingRows:
+          type: integer
+          description: "Rows whose key (e.g. account name) already matched a record in the database and were skipped instead of being re-inserted. Always present; 0 when the importer does not dedupe."
+        errorRows: { type: integer }
+        dryRun: { type: boolean }
+        errors:
+          type: array
+          items: { $ref: "#/components/schemas/CsvImportError" }
+      required: [totalRows, validRows, insertedRows, existingRows, errorRows, dryRun, errors]
+
+    LegacyOwnerSummary:
+      type: object
+      description: A single distinct legacy `owner` text value with how many leads/deals/activities still need a real owner.
+      properties:
+        legacyOwner: { type: string }
+        leadCount: { type: integer }
+        dealCount: { type: integer }
+        activityCount: { type: integer }
+        totalCount: { type: integer }
+      required: [legacyOwner, leadCount, dealCount, activityCount, totalCount]
+
+    OwnerBackfillMapping:
+      type: object
+      properties:
+        legacyOwner: { type: string, minLength: 1 }
+        ownerId: { type: string, minLength: 1, description: "Target user id from the /users directory." }
+      required: [legacyOwner, ownerId]
+
+    OwnerBackfillRequest:
+      type: object
+      properties:
+        mappings:
+          type: array
+          items: { $ref: "#/components/schemas/OwnerBackfillMapping" }
+      required: [mappings]
+
+    OwnerBackfillResultEntry:
+      type: object
+      properties:
+        legacyOwner: { type: string }
+        ownerId: { type: string }
+        leadsUpdated: { type: integer }
+        dealsUpdated: { type: integer }
+        activitiesUpdated: { type: integer }
+      required: [legacyOwner, ownerId, leadsUpdated, dealsUpdated, activitiesUpdated]
+
+    OwnerBackfillResult:
+      type: object
+      properties:
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/OwnerBackfillResultEntry" }
+        totalLeadsUpdated: { type: integer }
+        totalDealsUpdated: { type: integer }
+        totalActivitiesUpdated: { type: integer }
+      required: [results, totalLeadsUpdated, totalDealsUpdated, totalActivitiesUpdated]
+
+    SearchHit:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        subtitle: { type: string, nullable: true }
+        status: { type: string, nullable: true }
+      required: [id, name]
+
+    SearchResults:
+      type: object
+      properties:
+        query: { type: string }
+        leads:
+          type: array
+          items: { $ref: "#/components/schemas/SearchHit" }
+        contacts:
+          type: array
+          items: { $ref: "#/components/schemas/SearchHit" }
+        accounts:
+          type: array
+          items: { $ref: "#/components/schemas/SearchHit" }
+        deals:
+          type: array
+          items: { $ref: "#/components/schemas/SearchHit" }
+      required: [query, leads, contacts, accounts, deals]
+
+    CustomPropertyRecordType:
+      type: string
+      enum: [lead, deal, account, contact]
+
+    CustomPropertyType:
+      type: string
+      enum: [text, number, date, single_select, multi_select, boolean]
+
+    CustomProperty:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        recordType: { $ref: "#/components/schemas/CustomPropertyRecordType" }
+        key: { type: string }
+        name: { type: string }
+        type: { $ref: "#/components/schemas/CustomPropertyType" }
+        required: { type: boolean }
+        options:
+          type: array
+          nullable: true
+          items: { type: string }
+        displayOrder: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required:
+        - id
+        - recordType
+        - key
+        - name
+        - type
+        - required
+        - displayOrder
+        - createdAt
+        - updatedAt
+
+    CustomPropertyInput:
+      type: object
+      properties:
+        recordType: { $ref: "#/components/schemas/CustomPropertyRecordType" }
+        name: { type: string, minLength: 1 }
+        type: { $ref: "#/components/schemas/CustomPropertyType" }
+        required: { type: boolean }
+        options:
+          type: array
+          nullable: true
+          items: { type: string, minLength: 1 }
+      required: [recordType, name, type]
+
+    CustomPropertyUpdateInput:
+      type: object
+      description: Partial update — recordType and key cannot be changed.
+      properties:
+        name: { type: string, minLength: 1 }
+        required: { type: boolean }
+        options:
+          type: array
+          nullable: true
+          items: { type: string, minLength: 1 }
+
+    CustomPropertyReorderInput:
+      type: object
+      properties:
+        recordType: { $ref: "#/components/schemas/CustomPropertyRecordType" }
+        propertyIds:
+          type: array
+          items: { type: string, format: uuid }
+      required: [recordType, propertyIds]
+
+    CustomPropertyValuesMap:
+      type: object
+      description: Map keyed by custom property `key`. Values may be string, number, boolean, ISO date string, string[], or null.
+      additionalProperties: true
+
+    CustomPropertyValuesUpsertInput:
+      type: object
+      properties:
+        recordType: { $ref: "#/components/schemas/CustomPropertyRecordType" }
+        recordId: { type: string, format: uuid }
+        values:
+          $ref: "#/components/schemas/CustomPropertyValuesMap"
+      required: [recordType, recordId, values]
+
+    CsvImportRecord:
+      type: object
+      description: A single audited CSV import — who ran it, how many rows landed, and any row-level errors.
+      properties:
+        id: { type: string, format: uuid }
+        entity:
+          type: string
+          description: Which collection was imported (e.g. "leads", "contacts").
+        importedAt: { type: string, format: date-time }
+        importedBy: { type: string, nullable: true, description: "Display name of the user who ran the import." }
+        importedById: { type: string, nullable: true }
+        totalRows: { type: integer }
+        validRows: { type: integer }
+        insertedRows: { type: integer }
+        errorRows: { type: integer }
+        errors:
+          type: array
+          items: { $ref: "#/components/schemas/CsvImportError" }
+      required:
+        - id
+        - entity
+        - importedAt
+        - totalRows
+        - validRows
+        - insertedRows
+        - errorRows
+        - errors
+
+    EmailTemplate:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        subject: { type: string }
+        bodyHtml: { type: string }
+        createdById: { type: string, nullable: true }
+        createdByName: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, name, subject, bodyHtml, createdAt, updatedAt]
+
+    EmailTemplateInput:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        subject: { type: string, minLength: 1, maxLength: 500 }
+        bodyHtml: { type: string, minLength: 1 }
+      required: [name, subject, bodyHtml]
+
+    EmailRenderInput:
+      type: object
+      description: |
+        Provide whatever record IDs are in scope. Merge tags referencing
+        unresolved fields (e.g. `{{deal.stage}}` with no dealId) are left
+        blank in the rendered output.
+      properties:
+        leadId: { type: string, format: uuid, nullable: true }
+        contactId: { type: string, format: uuid, nullable: true }
+        dealId: { type: string, format: uuid, nullable: true }
+        accountId: { type: string, format: uuid, nullable: true }
+
+    EmailRenderOutput:
+      type: object
+      properties:
+        subject: { type: string }
+        bodyHtml: { type: string }
+        to: { type: string, nullable: true, description: "Best-guess recipient email derived from the contact or lead." }
+        unresolvedTags:
+          type: array
+          description: Merge tags that could not be resolved (rendered as empty strings).
+          items: { type: string }
+      required: [subject, bodyHtml, unresolvedTags]
+
+    EmailSendInput:
+      type: object
+      properties:
+        to: { type: string, minLength: 1 }
+        subject: { type: string, minLength: 1 }
+        bodyHtml: { type: string, minLength: 1 }
+        templateId: { type: string, format: uuid, nullable: true }
+        leadId: { type: string, format: uuid, nullable: true }
+        contactId: { type: string, format: uuid, nullable: true }
+        dealId: { type: string, format: uuid, nullable: true }
+        accountId: { type: string, format: uuid, nullable: true }
+        transport:
+          type: string
+          enum: [gmail, mailto]
+          default: mailto
+          description: How the email is delivered. `gmail` requires the Gmail connector to be authorized for this workspace.
+      required: [to, subject, bodyHtml]
+
+    EmailSendOutput:
+      type: object
+      properties:
+        activity: { $ref: "#/components/schemas/Activity" }
+        transport:
+          type: string
+          enum: [gmail, mailto]
+        gmailMessageId:
+          type: string
+          nullable: true
+          description: Gmail-assigned message id when transport=gmail.
+      required: [activity, transport]
+
+    EmailTransportStatus:
+      type: object
+      properties:
+        gmailAvailable:
+          type: boolean
+          description: True when a Gmail connection is authorized for this workspace.
+      required: [gmailAvailable]
+
+    SequenceStepInput:
+      type: object
+      properties:
+        templateId: { type: string, format: uuid }
+        delayDays: { type: integer, minimum: 0, maximum: 365 }
+      required: [templateId, delayDays]
+
+    SequenceStep:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        stepOrder: { type: integer }
+        templateId: { type: string, format: uuid }
+        templateName: { type: string }
+        templateSubject: { type: string }
+        delayDays: { type: integer }
+      required: [id, stepOrder, templateId, templateName, templateSubject, delayDays]
+
+    SequenceInput:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string, nullable: true, maxLength: 1000 }
+        isActive: { type: boolean, default: true }
+        steps:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: "#/components/schemas/SequenceStepInput" }
+      required: [name, steps]
+
+    SequenceSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        isActive: { type: boolean }
+        stepCount: { type: integer }
+        activeEnrolments: { type: integer }
+        createdById: { type: string, nullable: true }
+        createdByName: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required:
+        - id
+        - name
+        - isActive
+        - stepCount
+        - activeEnrolments
+        - createdAt
+        - updatedAt
+
+    SequenceDetail:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        isActive: { type: boolean }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/SequenceStep" }
+        activeEnrolments: { type: integer }
+        createdById: { type: string, nullable: true }
+        createdByName: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required:
+        - id
+        - name
+        - isActive
+        - steps
+        - activeEnrolments
+        - createdAt
+        - updatedAt
+
+    SequenceEnrolInput:
+      type: object
+      properties:
+        leadId: { type: string, format: uuid, nullable: true }
+        contactId: { type: string, format: uuid, nullable: true }
+
+    SequenceEnrolment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        sequenceId: { type: string, format: uuid }
+        sequenceName: { type: string }
+        leadId: { type: string, nullable: true }
+        contactId: { type: string, nullable: true }
+        status: { type: string, enum: [active, paused, completed, unenrolled] }
+        currentStep: { type: integer }
+        stepCount: { type: integer }
+        nextSendAt: { type: string, format: date-time, nullable: true }
+        lastSentAt: { type: string, format: date-time, nullable: true }
+        pauseReason: { type: string, nullable: true }
+        enrolledById: { type: string, nullable: true }
+        enrolledByName: { type: string, nullable: true }
+        enrolledAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+      required:
+        - id
+        - sequenceId
+        - sequenceName
+        - status
+        - currentStep
+        - stepCount
+        - enrolledAt
+
+    AvailabilitySettings:
+      type: object
+      properties:
+        userId: { type: string }
+        slug: { type: string }
+        weekdays:
+          type: array
+          description: Days of week (0=Sunday … 6=Saturday) the staff is bookable.
+          items: { type: integer, minimum: 0, maximum: 6 }
+        startMinute: { type: integer, minimum: 0, maximum: 1440 }
+        endMinute: { type: integer, minimum: 0, maximum: 1440 }
+        durationMinutes: { type: integer, minimum: 5, maximum: 480 }
+        bufferMinutes: { type: integer, minimum: 0, maximum: 240 }
+        timezone: { type: string }
+        enabled: { type: boolean }
+        ownerName: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required:
+        - userId
+        - slug
+        - weekdays
+        - startMinute
+        - endMinute
+        - durationMinutes
+        - bufferMinutes
+        - timezone
+        - enabled
+        - createdAt
+        - updatedAt
+
+    AvailabilityInput:
+      type: object
+      properties:
+        slug: { type: string, nullable: true, maxLength: 60 }
+        weekdays:
+          type: array
+          items: { type: integer, minimum: 0, maximum: 6 }
+        startMinute: { type: integer, minimum: 0, maximum: 1440 }
+        endMinute: { type: integer, minimum: 0, maximum: 1440 }
+        durationMinutes: { type: integer, minimum: 5, maximum: 480 }
+        bufferMinutes: { type: integer, minimum: 0, maximum: 240 }
+        timezone: { type: string, minLength: 1 }
+        enabled: { type: boolean }
+      required:
+        - weekdays
+        - startMinute
+        - endMinute
+        - durationMinutes
+        - bufferMinutes
+        - timezone
+        - enabled
+
+    Booking:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        slotAt: { type: string, format: date-time }
+        durationMinutes: { type: integer }
+        parentName: { type: string }
+        parentEmail: { type: string }
+        parentPhone: { type: string, nullable: true }
+        childName: { type: string }
+        grade: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        status: { type: string }
+        leadId: { type: string, nullable: true }
+        activityId: { type: string, nullable: true }
+        calendarEventId: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+      required:
+        - id
+        - slotAt
+        - durationMinutes
+        - parentName
+        - parentEmail
+        - childName
+        - status
+        - createdAt
+
+    CalendarStatus:
+      type: object
+      properties:
+        googleCalendarAvailable: { type: boolean }
+      required: [googleCalendarAvailable]
+
+    PublicBookingPage:
+      type: object
+      properties:
+        slug: { type: string }
+        staffName: { type: string }
+        schoolName: { type: string }
+        durationMinutes: { type: integer }
+        timezone: { type: string }
+      required: [slug, staffName, schoolName, durationMinutes, timezone]
+
+    PublicBookingSlot:
+      type: object
+      properties:
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+      required: [startAt, endAt]
+
+    PublicBookingSlots:
+      type: object
+      properties:
+        slots:
+          type: array
+          items: { $ref: "#/components/schemas/PublicBookingSlot" }
+        durationMinutes: { type: integer }
+      required: [slots, durationMinutes]
+
+    PublicBookingInput:
+      type: object
+      properties:
+        slotAt: { type: string, format: date-time }
+        parentName: { type: string, minLength: 1, maxLength: 200 }
+        parentEmail: { type: string, minLength: 3, maxLength: 200 }
+        parentPhone: { type: string, nullable: true, maxLength: 50 }
+        childName: { type: string, minLength: 1, maxLength: 200 }
+        grade: { type: string, nullable: true, maxLength: 50 }
+        notes: { type: string, nullable: true, maxLength: 2000 }
+      required: [slotAt, parentName, parentEmail, childName]
+
+    PublicBookingResult:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        slotAt: { type: string, format: date-time }
+        durationMinutes: { type: integer }
+        parentName: { type: string }
+        parentEmail: { type: string }
+        childName: { type: string }
+        grade: { type: string, nullable: true }
+        status: { type: string }
+        calendarEventId: { type: string, nullable: true }
+        staffName: { type: string }
+      required:
+        - id
+        - slotAt
+        - durationMinutes
+        - parentName
+        - parentEmail
+        - childName
+        - status
+        - staffName
+
+    InboxThreadSummary:
+      type: object
+      required:
+        - id
+        - subject
+        - lastMessageAt
+        - lastSnippet
+        - lastFromName
+        - unreadCount
+        - status
+        - contactId
+        - contactName
+      properties:
+        id: { type: string, format: uuid }
+        subject: { type: [string, 'null'] }
+        lastMessageAt: { type: [string, 'null'], format: date-time }
+        lastSnippet: { type: [string, 'null'] }
+        lastFromName: { type: [string, 'null'] }
+        lastFromEmail: { type: [string, 'null'] }
+        unreadCount: { type: integer }
+        status: { type: string, enum: [open, closed] }
+        contactId: { type: [string, 'null'], format: uuid }
+        contactName: { type: [string, 'null'] }
+        assigneeId: { type: [string, 'null'] }
+        assigneeName: { type: [string, 'null'] }
+    InboxMessage:
+      type: object
+      required:
+        - id
+        - direction
+        - sentAt
+      properties:
+        id: { type: string, format: uuid }
+        direction: { type: string, enum: [inbound, outbound] }
+        fromEmail: { type: [string, 'null'] }
+        fromName: { type: [string, 'null'] }
+        toEmails: { type: [string, 'null'] }
+        subject: { type: [string, 'null'] }
+        snippet: { type: [string, 'null'] }
+        bodyHtml: { type: [string, 'null'] }
+        bodyText: { type: [string, 'null'] }
+        sentAt: { type: [string, 'null'], format: date-time }
+    InboxThreadDetail:
+      type: object
+      required: [thread, messages]
+      properties:
+        thread: { $ref: '#/components/schemas/InboxThreadSummary' }
+        messages:
+          type: array
+          items: { $ref: '#/components/schemas/InboxMessage' }
+    InboxReplyInput:
+      type: object
+      required: [bodyHtml]
+      properties:
+        bodyHtml:
+          type: string
+          minLength: 1
+          description: HTML body for the reply. Subject is auto-derived from the thread.
+    InboxCloseInput:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [open, closed]
+    InboxAssignInput:
+      type: object
+      properties:
+        assigneeId:
+          type: [string, 'null']
+          description: Staff user id to assign, or null to unassign.
+    ReportSource:
+      type: string
+      enum: [leads, deals, activities]
+    ReportMeasure:
+      type: string
+      enum: [count, sum_value, avg_value, avg_age_days]
+      description: |
+        count — row count;
+        sum_value / avg_value — sum / average of the numeric value column
+        (deals only); avg_age_days — average age in days from createdAt to now.
+    ReportDimension:
+      type: string
+      enum:
+        - owner
+        - source
+        - stage
+        - status
+        - type
+        - month_created
+        - week_created
+        - month_closed
+    ReportChartType:
+      type: string
+      enum: [bar, line, pie, table]
+    ReportConfig:
+      type: object
+      required: [source, measure, dimension]
+      properties:
+        source: { $ref: "#/components/schemas/ReportSource" }
+        measure: { $ref: "#/components/schemas/ReportMeasure" }
+        dimension: { $ref: "#/components/schemas/ReportDimension" }
+    SavedReport:
+      type: object
+      required:
+        - id
+        - name
+        - source
+        - chartType
+        - config
+        - pinnedToDashboard
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        source: { $ref: "#/components/schemas/ReportSource" }
+        chartType: { $ref: "#/components/schemas/ReportChartType" }
+        config: { $ref: "#/components/schemas/ReportConfig" }
+        pinnedToDashboard: { type: boolean }
+        createdBy: { type: [string, 'null'] }
+        createdByName: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    SavedReportInput:
+      type: object
+      required: [name, source, chartType, config]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: [string, 'null'] }
+        source: { $ref: "#/components/schemas/ReportSource" }
+        chartType: { $ref: "#/components/schemas/ReportChartType" }
+        config: { $ref: "#/components/schemas/ReportConfig" }
+    SavedReportPinInput:
+      type: object
+      required: [pinned]
+      properties:
+        pinned: { type: boolean }
+    ReportRunRow:
+      type: object
+      required: [label, value]
+      properties:
+        label: { type: string }
+        key: { type: [string, 'null'] }
+        value: { type: number }
+    ReportRunResult:
+      type: object
+      required: [rows, measureLabel, dimensionLabel]
+      properties:
+        rows:
+          type: array
+          items: { $ref: "#/components/schemas/ReportRunRow" }
+        measureLabel: { type: string }
+        dimensionLabel: { type: string }
